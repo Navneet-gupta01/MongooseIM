@@ -18,6 +18,7 @@
          make_inbox_stanza/0,
          make_inbox_stanza/1,
          make_inbox_stanza/2,
+         make_reset_inbox_stanza/1,
          get_error_message/1,
          inbox_ns/0,
          reload_inbox_option/2, reload_inbox_option/3,
@@ -138,7 +139,6 @@ process_inbox_message(Client, Message, #conv{unread = Unread, from = From, to = 
                                              content = Content, verify = Fun}, JIDVerifyFun) ->
     FromJid = ensure_conv_binary_jid(From),
     ToJid = ensure_conv_binary_jid(To),
-    Unread = get_unread_count(Message),
     escalus:assert(is_message, Message),
     Unread = get_unread_count(Message),
     [InnerMsg] = get_inner_msg(Message),
@@ -249,6 +249,25 @@ make_inbox_stanza(GetParams, Verify) ->
                       children = [make_inbox_form(GetParams, Verify)]},
     GetIQ#xmlel{children = [QueryTag]}.
 
+-spec make_reset_inbox_stanza(jid:jid() | escalus:client() | atom() | binary() | string()) ->
+    exml:element().
+make_reset_inbox_stanza(InterlocutorJid) ->
+    make_reset_inbox_stanza(InterlocutorJid, 0).
+
+-spec make_reset_inbox_stanza(jid:jid() | escalus:client() | atom() | binary() | string(),
+                              non_neg_integer() ) -> exml:element().
+make_reset_inbox_stanza(#jid{} = InterlocutorJid, Count) ->
+    make_reset_inbox_stanza(jid:to_binary(jid:to_bare(InterlocutorJid)), Count);
+make_reset_inbox_stanza(InterlocutorJid, Count) ->
+    escalus_stanza:iq_set_nonquery(
+      ?NS_ESL_INBOX,
+      [#xmlel{name = <<"reset">>,
+              attrs = [
+                       {<<"xmlns">>, ?NS_ESL_INBOX},
+                       {<<"jid">>, escalus_utils:get_short_jid(InterlocutorJid)},
+                       {<<"count">>, integer_to_binary(Count)}
+                      ],
+              children = []}]).
 
 -spec check_jid_fun(IsCaseSensitive :: boolean(), CheckResource :: boolean()) -> jid_verify_fun().
 check_jid_fun(true, true) ->
