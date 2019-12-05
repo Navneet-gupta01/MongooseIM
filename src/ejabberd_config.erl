@@ -93,7 +93,7 @@ start() ->
     Config = get_ejabberd_config_path(),
     ejabberd_config:load_file(Config),
     %% This start time is used by mod_last:
-    add_local_option(node_start, p1_time_compat:timestamp()),
+    add_local_option(node_start, erlang:timestamp()),
     ok.
 
 
@@ -403,16 +403,15 @@ try_reload_cluster(ReloadContext, Changes) ->
     try
         do_reload_cluster(Changes)
     catch
-        Class:Reason ->
-            Stacktrace = erlang:get_stacktrace(),
+        Class:Reason:StackTrace ->
             ?CRITICAL_MSG("issue=try_reload_cluster_failed "
                            "reason=~p:~p stacktrace=~1000p",
-                          [Class, Reason, Stacktrace]),
+                          [Class, Reason, StackTrace]),
             Filename = dump_reload_state(try_reload_cluster, ReloadContext),
             Reason2 = #{issue => try_reload_cluster_failed,
                         reason => Reason,
                         dump_filename => Filename},
-            erlang:raise(Class, Reason2, Stacktrace)
+            erlang:raise(Class, Reason2, StackTrace)
     end.
 
 do_reload_cluster(Changes) ->

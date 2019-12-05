@@ -21,9 +21,7 @@
 -export([archive_size/4,
          archive_message/9,
          lookup_messages/3,
-         remove_archive/4,
-         purge_single_message/6,
-         purge_multiple_messages/9]).
+         remove_archive/4]).
 
 %% Called from mod_mam_rdbms_async_writer
 -export([prepare_message/6, prepare_insert/2]).
@@ -71,14 +69,6 @@
 
 -spec start(jid:server(), _) -> 'ok'.
 start(Host, Opts) ->
-    case lists:keyfind(hand_made_partitions, 1, Opts) of
-        false -> ok;
-        _ ->
-            ?ERROR_MSG("hand_made_partitions option for mod_mam_muc_rdbms_arch "
-                       "is no longer supported", []),
-            error(hand_made_partitions_not_supported)
-    end,
-
     prepare_insert(insert_mam_muc_message, 1),
 
     start_muc(Host, Opts).
@@ -101,8 +91,6 @@ start_muc(Host, _Opts) ->
     ejabberd_hooks:add(mam_muc_archive_size, Host, ?MODULE, archive_size, 50),
     ejabberd_hooks:add(mam_muc_lookup_messages, Host, ?MODULE, lookup_messages, 50),
     ejabberd_hooks:add(mam_muc_remove_archive, Host, ?MODULE, remove_archive, 50),
-    ejabberd_hooks:add(mam_muc_purge_single_message, Host, ?MODULE, purge_single_message, 50),
-    ejabberd_hooks:add(mam_muc_purge_multiple_messages, Host, ?MODULE, purge_multiple_messages, 50),
     ejabberd_hooks:add(get_mam_muc_gdpr_data, Host, ?MODULE, get_mam_muc_gdpr_data, 50),
     ok.
 
@@ -118,9 +106,6 @@ stop_muc(Host) ->
     ejabberd_hooks:delete(mam_muc_archive_size, Host, ?MODULE, archive_size, 50),
     ejabberd_hooks:delete(mam_muc_lookup_messages, Host, ?MODULE, lookup_messages, 50),
     ejabberd_hooks:delete(mam_muc_remove_archive, Host, ?MODULE, remove_archive, 50),
-    ejabberd_hooks:delete(mam_muc_purge_single_message, Host, ?MODULE, purge_single_message, 50),
-    ejabberd_hooks:delete(mam_muc_purge_multiple_messages, Host, ?MODULE,
-                          purge_multiple_messages, 50),
     ejabberd_hooks:delete(get_mam_muc_gdpr_data, Host, ?MODULE, get_mam_muc_gdpr_data, 50),
     ok.
 
@@ -149,10 +134,10 @@ archive_message(_Result, Host, MessID, RoomID, _LocJID = #jid{},
         Row = prepare_message(Host, MessID, RoomID, SenderJID, UserRoomJID, Packet),
         {updated, 1} = mod_mam_utils:success_sql_execute(Host, insert_mam_muc_message, Row),
         ok
-    catch _Type:Reason ->
+    catch _Type:Reason:StackTrace ->
             ?ERROR_MSG("event=archive_message_failed mess_id=~p room_id=~p "
                        "from_nick=~p reason='~p' stacktrace=~p",
-                       [MessID, RoomID, UserRoomJID#jid.lresource, Reason, erlang:get_stacktrace()]),
+                       [MessID, RoomID, UserRoomJID#jid.lresource, Reason, StackTrace]),
             {error, Reason}
     end.
 
@@ -188,8 +173,7 @@ lookup_messages(_Result, Host,
                         Start, End, Now, WithJID,
                         mod_mam_utils:normalize_search_text(SearchText),
                         PageSize, IsSimple)
-    catch _Type:Reason ->
-        S = erlang:get_stacktrace(),
+    catch _Type:Reason:S ->
         {error, {Reason, {stacktrace, S}}}
     end.
 
@@ -390,44 +374,6 @@ remove_archive(Acc, Host, RoomID, _RoomJID) ->
        "WHERE room_id = ", use_escaped_integer(escape_room_id(RoomID))]),
     Acc.
 
--spec purge_single_message(_Result, Host :: jid:server(),
-                           MessID :: mod_mam:message_id(),
-                           RoomID :: mod_mam:archive_id(),
-                           RoomJID :: jid:jid(),
-                           Now :: unix_timestamp()) ->
-                                  ok  | {error, 'not-allowed'  | 'not-found'}.
-purge_single_message(_Result, Host, MessID, RoomID, _RoomJID, _Now) ->
-    Result =
-        mod_mam_utils:success_sql_query(
-          Host,
-          ["DELETE FROM mam_muc_message "
-           "WHERE room_id = ", use_escaped_integer(escape_room_id(RoomID)), " "
-           "AND id = ", use_escaped_integer(escape_message_id(MessID))]),
-    case Result of
-        {updated, 0} -> {error, 'not-found'};
-        {updated, 1} -> ok
-    end.
-
-
--spec purge_multiple_messages(_Result, Host :: jid:server(),
-                              RoomID :: mod_mam:archive_id(),
-                              RoomJID :: jid:jid(),
-                              Borders :: mod_mam:borders()  | undefined,
-                              Start :: unix_timestamp()  | undefined,
-                              End :: unix_timestamp()  | undefined,
-                              Now :: unix_timestamp(),
-                              WithJID :: jid:jid()  | undefined) ->
-                                     ok  | {error, 'not-allowed'}.
-purge_multiple_messages(_Result, Host, RoomID, _RoomJID, Borders,
-                        Start, End, _Now, WithJID) ->
-    Filter = prepare_filter(RoomID, Borders, Start, End, WithJID, undefined),
-    {updated, _} =
-        mod_mam_utils:success_sql_query(
-          Host,
-          ["DELETE FROM mam_muc_message ", Filter]),
-    ok.
-
-
 %% @doc Columns are `["id", "nick_name", "message"]'.
 -spec extract_messages(Host :: jid:server(),
                        Filter :: filter(), IOffset :: non_neg_integer(), IMax :: pos_integer(),
@@ -474,7 +420,10 @@ extract_gdpr_messages(Host, ArchiveID) ->
 %% @doc Zero-based index of the row with UMessID in the result test.
 %% If the element does not exists, the MessID of the next element will
 %% be returned instead.
+%%
+%% ```
 %% "SELECT COUNT(*) as "index" FROM mam_muc_message WHERE id <= '",  UMessID
+%% '''
 -spec calc_index(Host :: jid:server(),
                  Filter :: iodata(), SUMessID :: escaped_message_id()) -> non_neg_integer().
 calc_index(Host, Filter, SUMessID) ->

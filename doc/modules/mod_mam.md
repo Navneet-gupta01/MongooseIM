@@ -5,7 +5,6 @@ It uses [XEP-0059: Result Set Management](http://xmpp.org/extensions/xep-0059.ht
 It is a highly customizable module, that requires some skill and knowledge to operate properly and efficiently.
 
 MongooseIM is compatible with MAM 0.4-0.6.
-Version 0.3 is deprecated and won't be supported by the next release.
 
 Configure MAM with different storage backends:
 
@@ -122,6 +121,12 @@ Archive querying is done using Riak KV 2.0 [search mechanism](http://docs.basho.
 Your instance of Riak KV must be configured with Yokozuna enabled.
 
 This backend works with Riak KV 2.0 and above, but we recommend version 2.1.1.
+
+##### Riak-specific options
+
+* `bucket_type` (default `<<"mam_yz">>`) - Riak bucket type.
+
+* `search_index` (default `<<"mam">>`) - Riak index name.
 
 ### Cassandra backend
 

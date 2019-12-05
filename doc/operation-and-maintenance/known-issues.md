@@ -1,14 +1,40 @@
 This document provides a list of all known issues with MongooseIM operation and configuration.
 You may also find proposed workarounds if any is available.
 
-## MySQL + TLS + OTP 20.3
+## Missing MUC Light room config fields with RDBMS backend
 
-MongooseIM will not connect to MySQL over TLS on OTP 20.3 due to [the MySQL driver bug](https://github.com/mysql-otp/mysql-otp/issues/85).
+Before MongooseIM 3.5.x (incl.) new MUC Light rooms could be created with some config fields absent in the RDBMS table.
+These options couldn't be re-added later by changing the room config via requests from the clients.
 
-### Proposed workarounds
+It happened when the default config was a subset of the schema and the client hasn't provided these values when a room was created.
 
-* Upgrade OTP to 21.2 or higher.
-* Use unencrypted communication with MySQL.
+### How to fix this?
+
+You have to iterate over all rooms in the DB (`muc_light_rooms` table) and add missing entries to the `muc_light_config` table.
+Every option is inserted as a separate row and is stored as plain text, so it should be straightforward.
+
+Let's say you were using the following config:
+
+```
+{config_schema, [
+                 "roomname",
+                 "subject",
+                 "background",
+                 "notification_sound"
+                ]},
+{default_config, [
+                  {"roomname", "The room"},
+                  {"subject", "Chit-chat"}
+                 ]}
+```
+
+Your client application has created some rooms without the `background` option by mistake.
+
+For every `id` in the `muc_light_rooms` table, you need to execute:
+
+```
+INSERT INTO muc_light_config(room_id, opt, val) VALUES ('put id here', 'background', 'new default value');
+```
 
 ## MSSQL connectivity via ODBC
 

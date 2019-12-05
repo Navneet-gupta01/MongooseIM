@@ -233,7 +233,8 @@ init([{SockMod, Socket}, Opts]) ->
                                          shaper         = Shaper,
                                          ip             = IP,
                                          lang           = default_language(),
-                                         hibernate_after= HibernateAfter},
+                                         hibernate_after= HibernateAfter
+                                        },
              ?C2S_OPEN_TIMEOUT}
     end.
 
@@ -251,23 +252,25 @@ wait_for_stream({xmlstreamstart, _Name, _} = StreamStart, StateData) ->
     handle_stream_start(StreamStart, StateData);
 wait_for_stream(timeout, StateData) ->
     {stop, normal, StateData};
-%% TODO: this clause is most likely dead code - can't be triggered
-%%       with XMPP level tests;
-%%       see github.com/esl/ejabberd_tests/tree/element-before-stream-start
-wait_for_stream({xmlstreamelement, _}, StateData) ->
-    c2s_stream_error(mongoose_xmpp_errors:xml_not_well_formed(), StateData);
-wait_for_stream({xmlstreamend, _}, StateData) ->
-    c2s_stream_error(mongoose_xmpp_errors:xml_not_well_formed(), StateData);
-wait_for_stream({xmlstreamerror, _}, StateData) ->
-    send_header(StateData, ?MYNAME, << "1.0">>, <<"">>),
-    c2s_stream_error(mongoose_xmpp_errors:xml_not_well_formed(), StateData);
 wait_for_stream(closed, StateData) ->
-    {stop, normal, StateData}.
+    {stop, normal, StateData};
+wait_for_stream(_UnexpectedItem, #state{ server = Server } = StateData) ->
+    case ejabberd_config:get_local_option(hide_service_name, Server) of
+        true ->
+            {stop, normal, StateData};
+        _ ->
+            send_header(StateData, Server, << "1.0">>, <<"">>),
+            c2s_stream_error(mongoose_xmpp_errors:xml_not_well_formed(), StateData)
+    end.
 
 handle_stream_start({xmlstreamstart, _Name, Attrs}, #state{} = S0) ->
     Server = jid:nameprep(xml:get_attr_s(<<"to">>, Attrs)),
+    StreamMgmtConfig = case gen_mod:is_loaded(Server, mod_stream_management) of
+                            true -> false;
+                            _ -> disabled
+                        end,
     Lang = get_xml_lang(Attrs),
-    S = S0#state{server = Server, lang = Lang},
+    S = S0#state{server = Server, lang = Lang, stream_mgmt = StreamMgmtConfig},
     case {xml:get_attr_s(<<"xmlns:stream">>, Attrs),
           lists:member(Server, ?MYHOSTS)} of
         {?NS_STREAM, true} ->
@@ -745,7 +748,7 @@ do_open_session_common(Acc, JID, #state{user = U, server = S, resource = R} = Ne
     Fs1 = [LJID | Fs],
     Ts1 = [LJID | Ts],
     PrivList = ejabberd_hooks:run_fold(privacy_get_user_list, S, #userlist{}, [U, S]),
-    SID = {p1_time_compat:timestamp(), self()},
+    SID = {erlang:timestamp(), self()},
     Conn = get_conn_type(NewStateData0),
     Info = [{ip, NewStateData0#state.ip}, {conn, Conn},
             {auth_module, NewStateData0#state.auth_module}],
@@ -1486,7 +1489,10 @@ print_state(State = #state{pres_t = T, pres_f = F, pres_a = A, pres_i = I}) ->
 terminate(_Reason, StateName, StateData) ->
     InitialAcc0 = mongoose_acc:new(
              #{location => ?LOCATION, lserver => StateData#state.server, element => undefined}),
-    Acc = mongoose_acc:set(stream_mgmt, h, StateData#state.stream_mgmt_in, InitialAcc0),
+    Acc = case StateData#state.stream_mgmt of
+              true -> mongoose_acc:set(stream_mgmt, h, StateData#state.stream_mgmt_in, InitialAcc0);
+              _ -> InitialAcc0
+          end,
     case {should_close_session(StateName), StateData#state.authenticated} of
         {false, _} ->
             ok;
@@ -1604,22 +1610,35 @@ send_text(StateData, Text) ->
     mongoose_metrics:update(global, [data, xmpp, sent, xml_stanza_size], Size),
     (StateData#state.sockmod):send(StateData#state.socket, Text).
 
--spec maybe_send_element_from_server_jid_safe(state(), El :: exml:element()) -> any().
-maybe_send_element_from_server_jid_safe(#state{stream_mgmt = false} = State, El) ->
-    send_element_from_server_jid(State, El);
+-spec maybe_send_element_from_server_jid_safe(state(), exml:element()) -> any().
 maybe_send_element_from_server_jid_safe(State, El) ->
-    case catch send_element_from_server_jid(State, El) of
+    maybe_send_element_from_server_jid_safe(no_acc, State, El).
+
+-spec maybe_send_element_from_server_jid_safe(mongoose_acc:t() | no_acc,
+                                              state(),
+                                              exml:element()) -> any().
+maybe_send_element_from_server_jid_safe(Acc, #state{stream_mgmt = StreamMgmt} = State, El)
+  when StreamMgmt =:= false; StreamMgmt =:= disabled ->
+    send_element_from_server_jid(Acc, State, El);
+maybe_send_element_from_server_jid_safe(Acc, State, El) ->
+    case catch send_element_from_server_jid(Acc, State, El) of
         ok -> ok;
         _ -> error
     end.
 
 -spec send_element_from_server_jid(state(), exml:element()) -> any().
-send_element_from_server_jid(#state{server = Server} = StateData, #xmlel{} = El) ->
-    Acc = mongoose_acc:new(#{ location => ?LOCATION,
-                              from_jid => jid:make_noprep(<<>>, Server, <<>>),
-                              to_jid => StateData#state.jid,
-                              lserver => Server,
-                              element => El }),
+send_element_from_server_jid(StateData, #xmlel{} = El) ->
+    send_element_from_server_jid(no_acc, StateData, El).
+
+-spec send_element_from_server_jid(mongoose_acc:t() | no_acc, state(), exml:element()) -> any().
+send_element_from_server_jid(no_acc, #state{server = Server} = StateData, #xmlel{} = El) ->
+    Acc = mongoose_acc:new(#{location => ?LOCATION,
+                             from_jid => jid:make_noprep(<<>>, Server, <<>>),
+                             to_jid => StateData#state.jid,
+                             lserver => Server,
+                             element => El }),
+    send_element_from_server_jid(Acc, StateData, El);
+send_element_from_server_jid(Acc, StateData, #xmlel{} = El) ->
     Acc1 = send_element(Acc, El, StateData),
     mongoose_acc:get(c2s, send_result, Acc1).
 
@@ -1678,7 +1697,8 @@ send_header(StateData, Server, Version, Lang) ->
     send_text(StateData, Header).
 
 -spec maybe_send_trailer_safe(State :: state()) -> any().
-maybe_send_trailer_safe(#state{stream_mgmt = false} = State) ->
+maybe_send_trailer_safe(#state{stream_mgmt = StreamMgmt} = State)
+  when StreamMgmt =:= false; StreamMgmt =:= disabled ->
     send_trailer(State);
 maybe_send_trailer_safe(StateData) ->
     catch send_trailer(StateData).
@@ -1693,9 +1713,10 @@ send_trailer(StateData) ->
 -spec send_and_maybe_buffer_stanza(mongoose_acc:t(), packet(), state()) ->
     {ok | resume, mongoose_acc:t(), state()}.
 send_and_maybe_buffer_stanza(Acc, {J1, J2, El}, State)->
-    % to be removed
-    {SendResult, BufferedStateData} =
-        send_and_maybe_buffer_stanza({J1, J2, mod_amp:strip_amp_el_from_request(El)}, State),
+    StrippedStanza = mod_amp:strip_amp_el_from_request(El),
+    {SendResult, _, BufferedStateData} = send_and_maybe_buffer_stanza_no_ack(Acc,
+                                                                          {J1, J2, StrippedStanza},
+                                                                          State),
     mod_amp:check_packet(El, result_to_amp_event(SendResult)),
     case SendResult of
         ok ->
@@ -1716,12 +1737,13 @@ send_and_maybe_buffer_stanza(Acc, {J1, J2, El}, State)->
 result_to_amp_event(ok) -> delivered;
 result_to_amp_event(_) -> delivery_failed.
 
--spec send_and_maybe_buffer_stanza(packet(), state()) ->
-    {ok | any(), state()}.
-send_and_maybe_buffer_stanza({_, _, Stanza} = Packet, State) ->
-    SendResult = maybe_send_element_from_server_jid_safe(State, Stanza),
+-spec send_and_maybe_buffer_stanza_no_ack(mongoose_acc:t(), packet(), state()) ->
+    {ok | any(), mongoose_acc:t(), state()}.
+send_and_maybe_buffer_stanza_no_ack(Acc, {_, _, Stanza} = Packet, State) ->
+    SendResult = maybe_send_element_from_server_jid_safe(Acc, State, Stanza),
     BufferedStateData = buffer_out_stanza(Packet, State),
-    {SendResult, BufferedStateData}.
+    {SendResult, Acc, BufferedStateData}.
+
 
 -spec new_id() -> binary().
 new_id() ->
@@ -2704,36 +2726,47 @@ maybe_csi_inactive_optimisation(Acc, Packet, #state{csi_state = active} = State)
     send_and_maybe_buffer_stanza(Acc, Packet, State);
 maybe_csi_inactive_optimisation(Acc, Packet, #state{csi_buffer = Buffer} = State) ->
     NewBuffer = [Packet | Buffer],
-    NewState = flush_or_buffer_packets(State#state{csi_buffer = NewBuffer}),
+    NewState = flush_or_buffer_packets(Acc, State#state{csi_buffer = NewBuffer}),
     {ok, Acc, NewState}.
 
-flush_or_buffer_packets(State) ->
+flush_or_buffer_packets(Acc, State) ->
     MaxBuffSize = gen_mod:get_module_opt(State#state.server, mod_csi,
                                          buffer_max, 20),
     case length(State#state.csi_buffer) > MaxBuffSize of
         true ->
-            flush_csi_buffer(State);
+            flush_csi_buffer(Acc, State);
         _ ->
             State
     end.
 
 -spec flush_csi_buffer(state()) -> state().
-flush_csi_buffer(#state{csi_buffer = BufferOut} = State) ->
+flush_csi_buffer(State) ->
+    Acc = mongoose_acc:new(#{location => ?LOCATION,
+                             lserver => State#state.server,
+                             element => undefined, from_jid => undefined, to_jid => undefined}),
+    flush_csi_buffer(Acc, State).
+
+-spec flush_csi_buffer(mongoose_acc:t(), state()) -> state().
+flush_csi_buffer(Acc, #state{csi_buffer = BufferOut} = State) ->
     %%lists:foldr to preserve order
-    F = fun(Packet, {_, OldState}) ->
-                send_and_maybe_buffer_stanza(Packet, OldState)
+    F = fun({From, To, El}, {_, A, OldState}) ->
+                Accum = mongoose_acc:update_stanza(#{from_jid => From,
+                                                     to_jid => To,
+                                                     element => El },
+                                                   A),
+                send_and_maybe_buffer_stanza_no_ack(Accum, {From, To, El}, OldState)
         end,
-    {_, NewState} = lists:foldr(F, {ok, State}, BufferOut),
+    {_, _, NewState} = lists:foldr(F, {ok, Acc, State}, BufferOut),
     NewState#state{csi_buffer = []}.
 
 bounce_csi_buffer(#state{csi_buffer = []}) ->
     ok;
 bounce_csi_buffer(#state{csi_buffer = Buffer}) ->
     re_route_packets(Buffer).
+
 %%%----------------------------------------------------------------------
 %%% XEP-0198: Stream Management
 %%%----------------------------------------------------------------------
-
 maybe_enable_stream_mgmt(NextState, El, StateData) ->
     case {xml:get_tag_attr_s(<<"xmlns">>, El),
           StateData#state.stream_mgmt,
@@ -2756,8 +2789,12 @@ maybe_enable_stream_mgmt(NextState, El, StateData) ->
                                        stream_mgmt_buffer_max = BufferMax,
                                        stream_mgmt_ack_freq = AckFreq,
                                        stream_mgmt_resume_timeout = ResumeTimeout});
-        {?NS_STREAM_MGNT_3, _, _} ->
+        {?NS_STREAM_MGNT_3, true, _} ->
             send_element_from_server_jid(StateData, stream_mgmt_failed(<<"unexpected-request">>)),
+            send_trailer(StateData),
+            {stop, normal, StateData};
+        {?NS_STREAM_MGNT_3, disabled, _} ->
+            send_element_from_server_jid(StateData, stream_mgmt_failed(<<"feature-not-implemented">>)),
             send_trailer(StateData),
             {stop, normal, StateData};
         {_, _, _} ->
@@ -2770,7 +2807,7 @@ maybe_enable_stream_mgmt(NextState, El, StateData) ->
 enable_stream_resumption(SD) ->
     SMID = mod_stream_management:make_smid(),
     SID = case SD#state.sid of
-              undefined -> {p1_time_compat:timestamp(), self()};
+              undefined -> {erlang:timestamp(), self()};
               RSID -> RSID
           end,
     ok = mod_stream_management:register_smid(SMID, SID),
@@ -2841,8 +2878,8 @@ calc_to_drop(Handled, OldAcked) when Handled >= OldAcked ->
 calc_to_drop(Handled, OldAcked) ->
     Handled + ?STREAM_MGMT_H_MAX - OldAcked + 1.
 
-maybe_send_sm_ack(?NS_STREAM_MGNT_3, false, _NIncoming,
-                  NextState, StateData) ->
+maybe_send_sm_ack(?NS_STREAM_MGNT_3, StreamMgmt, _NIncoming, NextState, StateData)
+  when StreamMgmt =:= false; StreamMgmt =:= disabled ->
     ?WARNING_MSG("received <r/> but stream management is off!", []),
     fsm_next_state(NextState, StateData);
 maybe_send_sm_ack(?NS_STREAM_MGNT_3, true, NIncoming,
@@ -2854,7 +2891,8 @@ maybe_send_sm_ack(_, _, _, _NextState, StateData) ->
     send_trailer(StateData),
     {stop, normal, StateData}.
 
-maybe_increment_sm_incoming(false, StateData) ->
+maybe_increment_sm_incoming(StreamMgmt, StateData)
+  when StreamMgmt =:= false; StreamMgmt =:= disabled ->
     StateData;
 maybe_increment_sm_incoming(true, StateData) ->
     Incoming = StateData#state.stream_mgmt_in,
@@ -2892,7 +2930,8 @@ stream_mgmt_ack(NIncoming) ->
                     {<<"h">>, integer_to_binary(NIncoming)}]}.
 
 -spec buffer_out_stanza(packet(), state()) -> state().
-buffer_out_stanza(_Packet, #state{stream_mgmt = false} = S) ->
+buffer_out_stanza(_Packet, #state{stream_mgmt = StreamMgmt} = S)
+  when StreamMgmt =:= false; StreamMgmt =:= disabled ->
     S;
 buffer_out_stanza(_Packet, #state{stream_mgmt_buffer_max = no_buffer} = S) ->
     S;
@@ -2949,7 +2988,8 @@ get_ack_freq() ->
 get_resume_timeout() ->
     mod_stream_management:get_resume_timeout(?STREAM_MGMT_RESUME_TIMEOUT).
 
-maybe_send_ack_request(Acc, #state{stream_mgmt = false}) ->
+maybe_send_ack_request(Acc, #state{stream_mgmt = StreamMgmt})
+  when StreamMgmt =:= false; StreamMgmt =:= disabled ->
     Acc;
 maybe_send_ack_request(Acc, #state{stream_mgmt_ack_freq = never}) ->
     Acc;
@@ -2965,7 +3005,8 @@ stream_mgmt_request() ->
     #xmlel{name = <<"r">>,
            attrs = [{<<"xmlns">>, ?NS_STREAM_MGNT_3}]}.
 
-flush_stream_mgmt_buffer(#state{stream_mgmt = false}) ->
+flush_stream_mgmt_buffer(#state{stream_mgmt = StreamMgmt})
+  when StreamMgmt =:= false; StreamMgmt =:= disabled ->
     false;
 flush_stream_mgmt_buffer(#state{stream_mgmt_buffer = Buffer}) ->
     re_route_packets(Buffer).
@@ -3017,7 +3058,7 @@ maybe_resume_session(NextState, El, StateData) ->
 do_resume_session(SMID, El, {sid, {_, Pid}}, #state{server = Server} = StateData) ->
     try
         {ok, OldState} = p1_fsm_old:sync_send_event(Pid, resume),
-        SID = {p1_time_compat:timestamp(), self()},
+        SID = {erlang:timestamp(), self()},
         Conn = get_conn_type(StateData),
         MergedState = merge_state(OldState,
                                   StateData#state{sid = SID, conn = Conn}),

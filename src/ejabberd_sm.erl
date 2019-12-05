@@ -161,20 +161,20 @@ route(From, To, Acc) ->
 
 route(From, To, Acc, {broadcast, Payload}) ->
     case (catch do_route(Acc, From, To, {broadcast, Payload})) of
-        {'EXIT', Reason} ->
+        {'EXIT', {Reason, StackTrace}} ->
             ?ERROR_MSG("error when routing from=~ts to=~ts in module=~p~n~nreason=~p~n~n"
             "broadcast=~p~n~nstack_trace=~p~n",
                 [jid:to_binary(From), jid:to_binary(To),
-                    ?MODULE, Reason, Payload, erlang:get_stacktrace()]);
+                    ?MODULE, Reason, Payload, StackTrace]);
         Acc1 -> Acc1
     end;
 route(From, To, Acc, El) ->
     case (catch do_route(Acc, From, To, El)) of
-        {'EXIT', Reason} ->
+        {'EXIT', {Reason, StackTrace}} ->
             ?ERROR_MSG("error when routing from=~ts to=~ts in module=~p~n~nreason=~p~n~n"
                        "packet=~ts~n~nstack_trace=~p~n",
                        [jid:to_binary(From), jid:to_binary(To),
-                        ?MODULE, Reason, exml:to_binary(El), erlang:get_stacktrace()]);
+                        ?MODULE, Reason, exml:to_binary(El), StackTrace]);
         Acc1 -> Acc1
     end.
 
@@ -561,8 +561,8 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     try
         ejabberd_commands:unregister_commands(commands())
-    catch E:R ->
-        ?ERROR_MSG("Caught error while terminating sm: ~p:~p~n~p", [E, R, erlang:get_stacktrace()])
+    catch E:R:S ->
+        ?ERROR_MSG("Caught error while terminating sm: ~p:~p~n~p", [E, R, S])
     end,
     ok.
 
@@ -650,10 +650,7 @@ do_route(Acc, From, To, El) ->
                     Session = lists:max(Ss),
                     Pid = element(2, Session#session.sid),
                     ?DEBUG("sending to process ~p~n", [Pid]),
-                    Pid ! {route, From, To, mongoose_acc:strip(#{ lserver => To#jid.lserver,
-                                                                  from_jid => From,
-                                                                  to_jid => To,
-                                                                  element => El }, Acc)},
+                    Pid ! {route, From, To, Acc},
                     Acc
             end
     end.
@@ -819,10 +816,7 @@ route_message(From, To, Acc, Packet) ->
               %% positive
               fun({Prio, Pid}) when Prio == Priority ->
                  %% we will lose message if PID is not alive
-                      Pid ! {route, From, To, mongoose_acc:strip(#{ lserver => To#jid.lserver,
-                                                                    from_jid => From,
-                                                                    to_jid => To,
-                                                                    element => Packet }, Acc)};
+                      Pid ! {route, From, To, Acc};
                  %% Ignore other priority:
                  ({_Prio, _Pid}) ->
                       ok

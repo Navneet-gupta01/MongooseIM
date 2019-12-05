@@ -1,15 +1,13 @@
 %%%-------------------------------------------------------------------
 %%% @author ludwikbukowski
 %%% @copyright (C) 2016, Erlang Solutions Ltd.
-%%% @doc
-%%%
-%%% @end
 %%% Created : 05. Jul 2016 12:59
 %%%-------------------------------------------------------------------
+
 %% @doc MongooseIM REST HTTP API for administration.
 %% This module implements cowboy REST callbacks and
 %% passes the requests on to the http api backend module.
-
+%% @end
 -module(mongoose_api_admin).
 -author("ludwikbukowski").
 -behaviour(cowboy_rest).
@@ -56,9 +54,9 @@ cowboy_router_paths(Base, Opts) ->
             Commands = mongoose_commands:list(admin),
             [handler_path(Base, Command, Opts) || Command <- Commands]
         catch
-            _:Err ->
+            _:Err:StackTrace ->
                 ?ERROR_MSG("Error occured when getting the commands list: ~p~n~p",
-                           [Err, erlang:get_stacktrace()]),
+                           [Err, StackTrace]),
                 []
         end.
 

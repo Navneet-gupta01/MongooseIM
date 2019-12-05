@@ -23,6 +23,7 @@ pages:
   - Migration Guide:
       - '3.1.1 to 3.2.0': 'migrations/3.1.1_3.2.0.md'
       - '3.3.0 to 3.4.0': 'migrations/3.3.0_3.4.0.md'
+      - '3.5.0 to 3.5.0plus': 'migrations/3.5.0_3.5.0plus.md'
       - 'MAM MUC migration helper': 'migrations/jid-from-mam-muc-script.md'
   - Platform:
       - 'Contributions to ecosystem': 'Contributions.md'
@@ -47,6 +48,8 @@ pages:
       - 'JWT Authentication Module': 'authentication-backends/JWT-authentication-module.md'
       - 'LDAP Authentication Module': 'authentication-backends/LDAP-authentication-module.md'
       - 'PKI Authentication Module': 'authentication-backends/PKI-authentication-module.md'
+      - 'Riak Authentication Module': 'authentication-backends/Riak-authentication-module.md'
+      - 'Dummy Authentication Module': 'authentication-backends/Dummy-authentication-module.md'
   - 'MongooseIM open XMPP extensions':
       - 'MUC light': 'open-extensions/muc_light.md'
       - 'Token-based reconnection': 'open-extensions/token-reconnection.md'

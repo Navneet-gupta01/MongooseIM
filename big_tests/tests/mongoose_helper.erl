@@ -20,7 +20,7 @@
 
 -export([kick_everyone/0]).
 -export([ensure_muc_clean/0]).
--export([successful_rpc/3, successful_rpc/4]).
+-export([successful_rpc/3, successful_rpc/4, successful_rpc/5]).
 -export([logout_user/2, logout_user/3]).
 -export([wait_until/2, wait_until/3, wait_for_user/3]).
 
@@ -28,9 +28,11 @@
 -export([get_session_pid/2]).
 -export([wait_for_route_message_count/2]).
 -export([wait_for_pid_to_die/1]).
+-export([supports_sasl_module/1]).
 
 -import(distributed_helper, [mim/0,
-                             rpc/4]).
+                             rpc/4,
+                             rpc/5]).
 
 -spec is_rdbms_enabled(Host :: binary()) -> boolean().
 is_rdbms_enabled(Host) ->
@@ -221,7 +223,11 @@ successful_rpc(Module, Function, Args) ->
 
 -spec successful_rpc(Node :: atom(), M :: module(), F :: atom(), A :: list()) -> term().
 successful_rpc(Node, Module, Function, Args) ->
-    case rpc(Node, Module, Function, Args) of
+    successful_rpc(Node, Module, Function, Args, timer:seconds(5)).
+
+-spec successful_rpc(Node :: atom(), M :: module(), F :: atom(), A :: list(), timeout()) -> term().
+successful_rpc(Node, Module, Function, Args, Timeout) ->
+    case rpc(Node, Module, Function, Args, Timeout) of
         {badrpc, Reason} ->
             ct:fail({badrpc, Module, Function, Args, Reason});
         Result ->
@@ -364,3 +370,7 @@ wait_for_pid_to_die(Pid) ->
         after 10000 ->
             ct:fail({wait_for_pid_to_die_failed, Pid})
     end.
+
+supports_sasl_module(Module) ->
+    Host = ct:get_config({hosts, mim, domain}),
+    rpc(mim(), ejabberd_auth, supports_sasl_module, [Host, Module]).

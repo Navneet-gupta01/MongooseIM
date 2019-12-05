@@ -4,7 +4,7 @@
 %%% @doc SASL EXTERNAL implementation (XEP178)
 %%%
 %%% SASL EXTERNAL mechanism requires client's SSL certificate. the purpose of
-%%% this module is to parse the certificate & get authorization identity (if
+%%% this module is to parse the certificate and get authorization identity (if
 %%% any provided by the client). this module doesn't make authorization, it
 %%% only prepares all the data and provides it to auth. backend.
 %%%
@@ -29,19 +29,16 @@
 -include("mongoose.hrl").
 -include("jlib.hrl").
 
--export([start/1, stop/0, mech_new/2, mech_step/2]).
+-export([mechanism/0, mech_new/2, mech_step/2]).
 
 -behaviour(cyrsasl).
 
 -record(state, {creds :: mongoose_credentials:t()}).
 -type sasl_external_state() :: #state{}.
 
-start(_Opts) ->
-    cyrsasl:register_mechanism(<<"EXTERNAL">>, ?MODULE, cert),
-    ok.
-
-stop() ->
-    ok.
+-spec mechanism() -> cyrsasl:mechanism().
+mechanism() ->
+    <<"EXTERNAL">>.
 
 -spec mech_new(Host :: ejabberd:server(),
                Creds :: mongoose_credentials:t()) -> {ok, sasl_external_state()}.

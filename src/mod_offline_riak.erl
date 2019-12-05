@@ -7,6 +7,7 @@
 %%% MongooseIM, Copyright (C) 2015      Erlang Solutions Ltd.
 %%%
 %%%----------------------------------------------------------------------
+
 %%% @doc Riak backend for last activity XEP
 %%%
 %%% The backend uses the existing riak connection pool, which is "globally" defined in
@@ -14,12 +15,14 @@
 %%% function.
 %%%
 %%% The module follows the approach taken by the other riak backends - it creates
-%%% the following bucket {<<"offline">>, <<"example.com">>} for each xmpp domain.
+%%% the following bucket `{<<"offline">>, <<"example.com">>}' for each xmpp domain.
 %%%
+%%% ```
 %%% Data Layout:
 %%% KV: {Username_and_timestamp:binary, Status:binary}
 %%% 2i: [Username:binary, Timestamp:integer]
-%%%
+%%% '''
+%%% @end
 -module(mod_offline_riak).
 
 -behaviour(mod_offline).
@@ -158,16 +161,16 @@ pop_msg(Key, LUser, LServer, To) ->
                      packet = Packet}
 
     catch
-        Error:Reason ->
+        Error:Reason:StackTrace ->
             ?WARNING_MSG("issue=~p, action=reading_key, host=~s, reason=~p, stack_trace=~p",
-                         [Error, LServer, Reason, erlang:get_stacktrace()]),
+                         [Error, LServer, Reason, StackTrace]),
             []
     end.
 
 
 -spec bucket_type(jid:lserver()) -> {binary(), jid:lserver()}.
 bucket_type(LServer) ->
-    {<<"offline">>, LServer}.
+    {gen_mod:get_module_opt(LServer, mod_offline, bucket_type, <<"offline">>), LServer}.
 
 -spec key(binary(), integer()) -> binary().
 key(LUser, TimestampInt) ->
@@ -212,9 +215,9 @@ fetch_msg(Key, LUser, LServer, To) ->
             packet = Packet}
 
     catch
-        Error:Reason ->
+        Error:Reason:StackTrace ->
             ?WARNING_MSG("issue=~p, action=reading_key, host=~s, reason=~p, stack_trace=~p",
-                [Error, LServer, Reason, erlang:get_stacktrace()]),
+                [Error, LServer, Reason, StackTrace]),
             []
     end.
 

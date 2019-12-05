@@ -926,13 +926,13 @@ xfield(Type, Label, Var, Val, Lang) ->
 %% @doc Get a pseudo unique Room Name. The Room Name is generated as a hash of
 %%      the requester JID, the local time and a random salt.
 %%
-%%      <<"pseudo">> because we don't verify that there is not a room
-%%       with the returned Name already created, nor mark the generated Name
-%%       as <<"already used">>.  But in practice, it is unique enough. See
-%%       http://xmpp.org/extensions/xep-0045.html#createroom-unique
+%%      `<<"pseudo">>' because we don't verify that there is not a room
+%%      with the returned Name already created, nor mark the generated Name
+%%      as `<<"already used">>'.  But in practice, it is unique enough. See
+%%      http://xmpp.org/extensions/xep-0045.html#createroom-unique
 -spec iq_get_unique(jid:jid()) -> jlib:xmlcdata().
 iq_get_unique(From) ->
-        #xmlcdata{content = sha:sha1_hex(term_to_binary([From, p1_time_compat:unique_integer(),
+        #xmlcdata{content = sha:sha1_hex(term_to_binary([From, erlang:unique_integer(),
                                                          mongoose_bin:gen_from_crypto()]))}.
 
 
